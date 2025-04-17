@@ -88,6 +88,8 @@ class RefreshStatistic:
             data.extend(self.getItemCount())
             writer.writerow(data)
 
+
+
 class SecretShopRefresh:
     def __init__(self, title_name: str, callback = None, tk_instance: tk = None, budget: int = None, allow_move: bool = False, debug: bool = False):
         #init state
@@ -492,6 +494,119 @@ class SecretShopRefresh:
         pyautogui.moveTo(x, y)
         pyautogui.mouseUp(button='left')
 
+class AutoBattleRestarter:
+    def __init__(self, title_name: str):
+        self.title_name = title_name
+        self.loop_active = True
+        self.restart_count = 0
+        self.csv_folder = 'AutoBattleHistory'
+        self.csv_filename = 'battle_restart_log.csv'
+
+        self.window = next((w for w in gw.getWindowsWithTitle(title_name) if w.title == title_name), None)
+        if not self.window:
+            raise Exception("Emulator window not found!")
+
+        self.asset_battle_end = cv2.imread(os.path.join('assets', 'battle_end_text.jpg'), 0)
+
+        # GUI popup
+        # GUI popup below the emulator window
+        self.popup = tk.Toplevel()
+        self.popup.title("Auto Battle Status")
+        self.label = tk.Label(self.popup, text="Battles restarted: 0", font=("Helvetica", 14))
+        self.label.pack(padx=20, pady=20)
+        self.popup.attributes("-topmost", True)
+
+        # Move popup under the emulator window
+        popup_width = 220
+        popup_height = 100
+        popup_x = self.window.left
+        popup_y = self.window.top + self.window.height  # directly under the emulator
+        self.popup.geometry(f"{popup_width}x{popup_height}+{popup_x}+{popup_y}")
+
+
+        # Start ESC monitoring
+        keyboard_thread = threading.Thread(target=self.checkKeyPress, daemon=True)
+        keyboard_thread.start()
+
+    def checkKeyPress(self):
+        while self.loop_active:
+            if keyboard.is_pressed('esc'):
+                print("ESC pressed. Stopping...")
+                self.loop_active = False
+        self.writeToCSV()
+        self.popup.destroy()
+
+    def takeScreenshot(self):
+        region = [self.window.left, self.window.top, self.window.width, self.window.height]
+        screenshot = ImageGrab.grab(bbox=(region[0], region[1], region[2] + region[0], region[3] + region[1]))
+        return np.array(screenshot)
+
+    def matchTemplate(self, screenshot_gray, template, threshold=0.9):
+        result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+        loc = np.where(result >= threshold)
+        return loc[0].size > 0
+
+    def waitForBattleEnd(self):
+        while self.loop_active:
+            screenshot = self.takeScreenshot()
+            gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+            if self.matchTemplate(gray, self.asset_battle_end):
+                print("[Restarter] Battle end detected.")
+                return True
+            time.sleep(3)
+        return False
+
+    def click(self, rel_x, rel_y):
+        x = self.window.left + self.window.width * rel_x
+        y = self.window.top + self.window.height * rel_y
+        pyautogui.moveTo(x, y)
+        pyautogui.click()
+        time.sleep(1)
+
+    def restartBattle(self):
+        print("[Restarter] Restarting battle...")
+        self.click(0.90, 0.94)  # Confirm
+        time.sleep(4)
+        self.click(0.90, 0.94)  # Try Again
+        time.sleep(3)
+        self.click(0.90, 0.93)  # Select Team
+        time.sleep(3)
+        self.click(0.90, 0.93)  # Start
+
+        self.restart_count += 1
+        self.label.config(text=f"Battles restarted: {self.restart_count}")
+        print(f"[Restarter] Restarted count: {self.restart_count}")
+
+    def writeToCSV(self):
+        res_folder = 'AutoBattleRefreshHistory'
+        if not os.path.exists(res_folder):
+            os.makedirs(res_folder)
+
+        file_name = 'AutoBattleRefreshHistory.csv'
+        path = os.path.join(res_folder, file_name)
+
+        if not os.path.isfile(path):
+            with open(path, 'w', newline='') as file:
+                writer = csv.writer(file)
+                column_name = ['Time', 'Total Restarts']
+                writer.writerow(column_name)
+
+        with open(path, 'a', newline='') as file:
+            writer = csv.writer(file)
+            data = [datetime.now(), self.restart_count]
+            writer.writerow(data)
+
+        print(f"[Restarter] Log written to {path}")
+
+
+    def start(self):
+        print("[Restarter] Auto Battle Restarter is active.")
+        while self.loop_active:
+            if self.waitForBattleEnd():
+                self.restartBattle()
+        print("[Restarter] Exiting restart loop.")
+
+
 class AppConfig():
     def __init__(self):
         # here is where you can config setting
@@ -512,6 +627,11 @@ class AutoRefreshGUI:
     def __init__(self):
         self.app_config = AppConfig()
         self.root = tk.Tk()
+        self.hint_cbv = tk.IntVar()
+        self.move_zerozero_cbv = tk.IntVar()
+        self.enable_battle_restart_cbv = tk.IntVar()
+
+
         
         #gui
         #color
@@ -522,8 +642,8 @@ class AutoRefreshGUI:
         self.root.attributes("-alpha", 0.95)
 
         self.root.title('SHOP AUTO REFRESH')
-        self.root.geometry('420x745')
-        self.root.minsize(420, 745)
+        self.root.geometry('420x850')
+        self.root.minsize(420, 800)
         icon_path = os.path.join('assets', 'gui_icon.ico')
         self.root.iconbitmap(icon_path)
         self.title_name = ''
@@ -550,6 +670,8 @@ class AutoRefreshGUI:
             self.title_name = titles_combo_box.get()
             if not self.lock_start_button:
                 self.start_button.config(state=tk.NORMAL)
+                self.auto_battle_button.config(state=tk.NORMAL)
+
 
         def onEnter(event):
             title = titles_combo_box.get()
@@ -590,10 +712,16 @@ class AutoRefreshGUI:
             special_label.pack(side=tk.LEFT)
             special_cb.pack(side=tk.RIGHT)
             frame.pack()
+        
+        # Now declare your IntVars
+        self.hint_cbv = tk.IntVar()
+        self.move_zerozero_cbv = tk.IntVar()
+        self.enable_battle_restart_cbv = tk.IntVar()
 
+        # Now use the setup function safely
         setupSpecialSetting('Hint:', self.hint_cbv)
         setupSpecialSetting('Auto move emulator window to top left:', self.move_zerozero_cbv)
-
+        setupSpecialSetting('Enable Auto Battle Restart:', self.enable_battle_restart_cbv)
         #setting frame
         setting_frame = tk.Frame(self.root)
         setting_frame.config(bg=self.unite_bg_color)        #apply ui change here
@@ -624,6 +752,13 @@ class AutoRefreshGUI:
                                 font=('Helvetica',14),
                                 state=tk.DISABLED,
                                 command=self.startShopRefresh)
+        
+        self.auto_battle_button = tk.Button(master=self.root,
+                                text='Start Auto Battle',
+                                font=('Helvetica',14),
+                                state=tk.DISABLED,
+                                command=self.startAutoBattleRestart)
+
         if titles:
             for t in titles:
                 if t in gw.getAllTitles():
@@ -631,7 +766,9 @@ class AutoRefreshGUI:
                     titles_combo_box.set(self.title_name)
                     if not self.lock_start_button:
                         self.start_button.config(state=tk.NORMAL)
+                        self.auto_battle_button.config(state=tk.NORMAL)
                     break
+
 
         #UI from top to down
         app_title.pack(pady=(15,0))
@@ -684,6 +821,8 @@ class AutoRefreshGUI:
 
         #Step 4 profit
         self.start_button.pack(pady=(30,0))
+        self.auto_battle_button.pack(pady=(10,0))
+
         
         self.root.mainloop()
         
@@ -765,7 +904,25 @@ class AutoRefreshGUI:
         
         self.ssr.start()
 
+    def startAutoBattleRestart(self):
+        self.root.title('Auto Battle Running - Press ESC to stop')
+        self.lock_start_button = True
+        self.auto_battle_button.config(state=tk.DISABLED)
+
+        try:
+            self.restarter = AutoBattleRestarter(self.title_name)
+            restarter_thread = threading.Thread(target=self.restarter.start, daemon=True)
+            restarter_thread.start()
+            print("Auto Battle Restarter started.")
+        except Exception as e:
+            print("Error launching Auto Battle Restarter:", e)
+            self.root.title('SHOP AUTO REFRESH')
+            self.auto_battle_button.config(state=tk.NORMAL)
+            self.lock_start_button = False
+
+
 if __name__ == '__main__':
+
     # Secret shop with GUI
     gui = AutoRefreshGUI()
     
