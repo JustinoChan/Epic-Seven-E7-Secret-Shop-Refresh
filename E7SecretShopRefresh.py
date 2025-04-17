@@ -495,7 +495,8 @@ class SecretShopRefresh:
         pyautogui.mouseUp(button='left')
 
 class AutoBattleRestarter:
-    def __init__(self, title_name: str):
+    def __init__(self, title_name: str, gui=None):
+        self.gui = gui  # Store reference to AutoRefreshGUI
         self.title_name = title_name
         self.loop_active = True
         self.restart_count = 0
@@ -505,6 +506,14 @@ class AutoBattleRestarter:
         self.window = next((w for w in gw.getWindowsWithTitle(title_name) if w.title == title_name), None)
         if not self.window:
             raise Exception("Emulator window not found!")
+        
+        try:
+            if self.window.isMaximized or self.window.isMinimized:
+                self.window.restore()
+            self.window.moveTo(0, 0)
+            self.window.resizeTo(906, 539)
+        except Exception as e:
+            print("[Restarter] Failed to move/resize window:", e)
 
         self.asset_battle_end = cv2.imread(os.path.join('assets', 'battle_end_text.jpg'), 0)
 
@@ -535,6 +544,12 @@ class AutoBattleRestarter:
                 self.loop_active = False
         self.writeToCSV()
         self.popup.destroy()
+
+        # Re-enable GUI state
+        if self.gui:
+            self.gui.auto_battle_button.config(state=tk.NORMAL)
+            self.gui.lock_start_button = False
+            self.gui.root.title('SHOP AUTO REFRESH')
 
     def takeScreenshot(self):
         region = [self.window.left, self.window.top, self.window.width, self.window.height]
@@ -910,7 +925,7 @@ class AutoRefreshGUI:
         self.auto_battle_button.config(state=tk.DISABLED)
 
         try:
-            self.restarter = AutoBattleRestarter(self.title_name)
+            self.restarter = AutoBattleRestarter(self.title_name, gui=self)
             restarter_thread = threading.Thread(target=self.restarter.start, daemon=True)
             restarter_thread.start()
             print("Auto Battle Restarter started.")
