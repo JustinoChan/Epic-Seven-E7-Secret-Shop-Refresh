@@ -568,7 +568,7 @@ class AutoBattleRestarter:
             if self.matchTemplate(gray, self.asset_battle_end):
                 print("[Restarter] Battle end detected.")
                 return True
-            time.sleep(3)
+            time.sleep(1)
         return False
 
     def click(self, rel_x, rel_y):
@@ -576,16 +576,16 @@ class AutoBattleRestarter:
         y = self.window.top + self.window.height * rel_y
         pyautogui.moveTo(x, y)
         pyautogui.click()
-        time.sleep(1)
+        time.sleep(.50)
 
     def restartBattle(self):
         print("[Restarter] Restarting battle...")
         self.click(0.90, 0.94)  # Confirm
-        time.sleep(4)
+        time.sleep(.80)
         self.click(0.90, 0.94)  # Try Again
-        time.sleep(3)
+        time.sleep(.80)
         self.click(0.90, 0.93)  # Select Team
-        time.sleep(3)
+        time.sleep(.80)
         self.click(0.90, 0.93)  # Start
 
         self.restart_count += 1
